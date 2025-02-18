@@ -15,6 +15,7 @@ import random
 import string
 import time
 import argparse
+import os
 
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -54,10 +55,24 @@ if __name__ == "__main__":
     # flask
     print("srv run on ", port)
 
+    # 获取脚本所在目录的绝对路径
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+    # 修改证书文件路径为项目的 ssl_key 目录
+    context = (
+        os.path.join(os.path.dirname(SCRIPT_DIR), "ssl_key/server.crt"),
+        os.path.join(os.path.dirname(SCRIPT_DIR), "ssl_key/server.key")
+    )
+
+    # 检查证书文件是否存在
+    if not os.path.exists(context[0]) or not os.path.exists(context[1]):
+        print("Warning: SSL certificate files not found. Running without SSL.")
+        context = None
+
     app.run(
-        debug=False,
-        threaded=True,
-        host=args.host,
+        host="0.0.0.0",
         port=port,
-        ssl_context=(args.certfile, args.keyfile),
+        ssl_context=context,
+        threaded=True,
+        debug=False
     )

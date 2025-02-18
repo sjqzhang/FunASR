@@ -17,7 +17,7 @@ function WebSocketConnectMethod( config ) { //定义socket连接方法类
 		var Uri = document.getElementById('wssip').value; //"wss://111.205.137.58:5821/wss/" //设置wss asr online接口地址 如 wss://X.X.X.X:port/wss/
 		if(Uri.match(/wss:\S*|ws:\S*/))
 		{
-			console.log("Uri"+Uri);
+			console.log("Connecting to WebSocket server at:", Uri);
 		}
 		else
 		{
@@ -26,16 +26,33 @@ function WebSocketConnectMethod( config ) { //定义socket连接方法类
 		}
  
 		if ( 'WebSocket' in window ) {
-			speechSokt = new WebSocket( Uri ); // 定义socket连接对象
-			speechSokt.onopen = function(e){onOpen(e);}; // 定义响应函数
-			speechSokt.onclose = function(e){
-			    console.log("onclose ws!");
-			    //speechSokt.close();
-				onClose(e);
+			try {
+				speechSokt = new WebSocket(Uri, ["binary"]);
+				console.log("WebSocket connection created");
+				
+				speechSokt.onopen = function(e){
+					console.log("WebSocket connection opened");
+					onOpen(e);
 				};
-			speechSokt.onmessage = function(e){onMessage(e);};
-			speechSokt.onerror = function(e){onError(e);};
-			return 1;
+				
+				speechSokt.onclose = function(e){
+					console.log("WebSocket connection closed, code:", e.code, "reason:", e.reason);
+					onClose(e);
+				};
+				
+				speechSokt.onmessage = function(e){onMessage(e);};
+				
+				speechSokt.onerror = function(e){
+					console.error("WebSocket error:", e);
+					onError(e);
+				};
+				
+				return 1;
+			} catch (error) {
+				console.error("Error creating WebSocket connection:", error);
+				alert('WebSocket 连接创建失败: ' + error.message);
+				return 0;
+			}
 		}
 		else {
 			alert('当前浏览器不支持 WebSocket');
@@ -108,11 +125,9 @@ function WebSocketConnectMethod( config ) { //定义socket连接方法类
 	}
 	
 	function onError( e ) {
- 
-		info_div.innerHTML="连接"+e;
-		console.log(e);
+		console.error("WebSocket error details:", e);
+		info_div.innerHTML = "连接错误: " + (e.message || e);
 		stateHandle(2);
-		
 	}
     
  

@@ -7,7 +7,12 @@ import tracemalloc
 import numpy as np
 import argparse
 import ssl
+import os
 
+# 获取当前脚本所在目录的路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 计算ssl_key目录的路径
+ssl_key_dir = os.path.normpath(os.path.join(current_dir, "../../../runtime/ssl_key"))
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -48,7 +53,7 @@ parser.add_argument("--ncpu", type=int, default=4, help="cpu cores")
 parser.add_argument(
     "--certfile",
     type=str,
-    default="../../ssl_key/server.crt",
+    default=os.path.join(ssl_key_dir, "server.crt"),
     required=False,
     help="certfile for ssl",
 )
@@ -56,7 +61,7 @@ parser.add_argument(
 parser.add_argument(
     "--keyfile",
     type=str,
-    default="../../ssl_key/server.key",
+    default=os.path.join(ssl_key_dir, "server.key"),
     required=False,
     help="keyfile for ssl",
 )
@@ -77,6 +82,7 @@ model_asr = AutoModel(
     device=args.device,
     disable_pbar=True,
     disable_log=True,
+    disable_update=True,
 )
 # asr
 model_asr_streaming = AutoModel(
@@ -87,6 +93,7 @@ model_asr_streaming = AutoModel(
     device=args.device,
     disable_pbar=True,
     disable_log=True,
+    disable_update=True,
 )
 # vad
 model_vad = AutoModel(
@@ -97,7 +104,7 @@ model_vad = AutoModel(
     device=args.device,
     disable_pbar=True,
     disable_log=True,
-    # chunk_size=60,
+    disable_update=True,
 )
 
 if args.punc_model != "":
@@ -109,6 +116,7 @@ if args.punc_model != "":
         device=args.device,
         disable_pbar=True,
         disable_log=True,
+        disable_update=True,
     )
 else:
     model_punc = None
@@ -135,7 +143,7 @@ async def clear_websocket():
     websocket_users.clear()
 
 
-async def ws_serve(websocket, path):
+async def ws_serve(websocket):
     frames = []
     frames_asr = []
     frames_asr_online = []
@@ -326,20 +334,57 @@ async def async_asr_online(websocket, audio_in):
             await websocket.send(message)
 
 
-if len(args.certfile) > 0:
-    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+async def create_server():
+    if len(args.certfile) > 0:
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_cert = args.certfile
+        ssl_key = args.keyfile
+        ssl_context.load_cert_chain(ssl_cert, keyfile=ssl_key)
+        return await websockets.serve(
+            ws_serve,
+            args.host,
+            args.port,
+            subprotocols=["binary"],
+            ping_interval=None,
+            ssl=ssl_context
+        )
+    else:
+        return await websockets.serve(
+            ws_serve,
+            args.host,
+            args.port,
+            subprotocols=["binary"],
+            ping_interval=None
+        )
 
-    # Generate with Lets Encrypt, copied to this location, chown to current user and 400 permissions
-    ssl_cert = args.certfile
-    ssl_key = args.keyfile
-
-    ssl_context.load_cert_chain(ssl_cert, keyfile=ssl_key)
-    start_server = websockets.serve(
-        ws_serve, args.host, args.port, subprotocols=["binary"], ping_interval=None, ssl=ssl_context
-    )
-else:
-    start_server = websockets.serve(
-        ws_serve, args.host, args.port, subprotocols=["binary"], ping_interval=None
-    )
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+if __name__ == "__main__":
+    # 创建新的事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # 在事件循环中创建服务器
+        server = loop.run_until_complete(create_server())
+        server_type = "wss" if len(args.certfile) > 0 else "ws"
+        server_url = f"{server_type}://{args.host}:{args.port}"
+        print(f"WebSocket server started at {server_url}")
+        print(f"SSL enabled: {len(args.certfile) > 0}")
+        print(f"Certificate file: {args.certfile}")
+        print(f"Key file: {args.keyfile}")
+        
+        # 添加一些调试信息
+        for sock in server.sockets:
+            print(f"Listening on {sock.getsockname()}")
+            
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped by user")
+    except Exception as e:
+        print(f"Error starting server: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        loop.stop()
+        server.close()
+        loop.run_until_complete(server.wait_closed())
+        loop.close()
